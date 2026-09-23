@@ -14,7 +14,7 @@ from siesta.core.interfaces import SiestaModule, StorageManager
 from siesta.core.storageFactory import get_storage_manager
 from siesta.model.StorageModel import MetaData
 from siesta.modules.analyse.directly_follows import compute_directly_follows
-from siesta.modules.analyse.loop_detection import compute_loop_detection
+from siesta.modules.analyse.loop_detection import DEFAULT_MAX_PATTERN_WINDOW, compute_loop_detection
 from siesta.modules.analyse.durations import compute_activity_durations, compute_group_durations
 from siesta.modules.analyse.attribute_deviations import (
     compute_attribute_deviations, render_html, ALL_STEPS,
@@ -50,6 +50,8 @@ class LoopDetectionConfig(BaseModel):
     filter_out: bool = Field(False, description="When true, keeps rare loops (support ≤ threshold)")
     top_k: int | None = Field(None, description="Keep only the k most-supported loops; null = all")
     trace_based: bool = Field(False, description="Add trace_ids list to each loop entry (only when grouping by trace_id)")
+    repeated_patterns: bool = Field(False, description="Also detect repeated patterns: blocks recurring later in the group, gaps allowed (A B C x y z A B C)")
+    max_pattern_window: int = Field(DEFAULT_MAX_PATTERN_WINDOW, ge=2, description="Longest block considered as a repeated pattern")
     output_path: str = Field("output/example_log", description="Local path prefix for the output file")
 
 
@@ -299,16 +301,23 @@ class Analysing(SiestaModule):
                 "filter_out": False,
                 "top_k": None,
                 "trace_based": False,
+                "repeated_patterns": False,
+                "max_pattern_window": 8,
             },
         },
     })]) -> Any:
-        """Detect self-loops and non-self-loops in an indexed event log.
+        """Detect self-loops, non-self-loops and repeated patterns in an indexed event log.
 
         A **self-loop** is an activity immediately followed by itself.
         A **non-self-loop** is a minimal cycle A -> … -> A where A does not appear in the body.
+        A **repeated pattern** is a block of activities that recurs later in the group, with
+        anything at all in between the occurrences: `A B C x y z A B C` holds the repeated
+        pattern `A -> B -> C`. Only detected when `repeated_patterns` is `true`.
 
-        Returns JSON with `self_loops` and `non_self_loops` arrays. Each entry contains the
-        activity pattern and its support fraction across groups.
+        Returns JSON with `self_loops`, `non_self_loops` and `repeated_patterns` arrays. Each
+        entry contains the activity pattern and its support fraction across groups; repeated
+        patterns additionally carry `max_occurrences`, the highest number of non-overlapping
+        occurrences of the block in any single group.
 
         **Config fields:**
         - `log_name` *(str)* - name of the indexed log. **Required.**
@@ -320,6 +329,15 @@ class Analysing(SiestaModule):
         - `filter_out` *(bool, default: `false`)* - when `true`, keeps loops with support ≤ threshold (rare loops).
         - `top_k` *(int | null, default: `null`)* - keep only the k most-supported loops. `null` = all.
         - `trace_based` *(bool, default: `false`)* - add a `trace_ids` list to each loop entry (only when grouping by `trace_id`).
+        - `repeated_patterns` *(bool, default: `false`)* - also detect repeated patterns, i.e. blocks of
+            2+ activities that recur later in the group with anything in between the occurrences
+            (`A B C x y z A B C` -> `A -> B -> C`). Only maximal blocks are kept: a block whose
+            occurrences can all be extended left or right by the same activity is reported as that
+            longer block instead (so no `A -> B` or `B -> C` above), and a block that is itself a
+            repetition of a shorter one (`A B A B`) is reported under that shorter block.
+        - `max_pattern_window` *(int, default: `8`)* - longest block considered as a repeated pattern.
+            Blocks of length 1 are always skipped since those are self-loops; a repeat longer than the
+            window is reported truncated to it rather than dropped.
         """
         logger.info(f"{self.name} running loop_detection via API.")
         self.siesta_config = get_system_config()
@@ -680,12 +698,15 @@ class Analysing(SiestaModule):
             filter_out=self.analyser_config.get("filter_out", False),
             top_k=self.analyser_config.get("top_k"),
             trace_based=self.analyser_config.get("trace_based", False),
+            repeated_patterns=self.analyser_config.get("repeated_patterns", False),
+            max_pattern_window=self.analyser_config.get("max_pattern_window") or DEFAULT_MAX_PATTERN_WINDOW,
         )
 
         events_df.unpersist()
         logger.info(
-            f"Completed. Found {len(result['self_loops'])} self-loop type(s) and "
-            f"{len(result['non_self_loops'])} non-self-loop type(s)."
+            f"Completed. Found {len(result['self_loops'])} self-loop type(s), "
+            f"{len(result['non_self_loops'])} non-self-loop type(s) and "
+            f"{len(result['repeated_patterns'])} repeated pattern(s)."
         )
 
         if caller == "cli":

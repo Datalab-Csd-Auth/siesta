@@ -12,5 +12,7 @@
   "min_timestamp": null,
   "top_k": null,
   "trace_based": false,
+  "repeated_patterns": false,
+  "max_pattern_window": 8,
   "duration_mode": "group"
 }

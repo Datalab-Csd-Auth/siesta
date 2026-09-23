@@ -50,6 +50,7 @@ def _build_loops_html(response: dict) -> str | None:
     for loop_type, entries, color in [
         ("self", response.get("self_loops", []), "blue"),
         ("non-self", response.get("non_self_loops", []), "orange"),
+        ("repeated", response.get("repeated_patterns", []), "green"),
     ]:
         for item in entries:
             pattern = str(item.get("pattern", "")).strip()
@@ -92,17 +93,22 @@ def _render_analyser_response(response: Any, method: str) -> None:
         total_groups = response.get("total_groups")
         self_loops = response.get("self_loops", []) or []
         non_self_loops = response.get("non_self_loops", []) or []
+        repeated_patterns = response.get("repeated_patterns", []) or []
 
         st.subheader("Loop detection summary")
         if total_groups is not None:
             st.metric("Total groups", total_groups)
         st.metric("Self-loop patterns", len(self_loops))
         st.metric("Non-self-loop patterns", len(non_self_loops))
+        if repeated_patterns:
+            st.metric("Repeated patterns", len(repeated_patterns))
 
         counts = {
             "Self loops": len(self_loops),
             "Non-self loops": len(non_self_loops),
         }
+        if repeated_patterns:
+            counts["Repeated patterns"] = len(repeated_patterns)
         _maybe_pie_chart(counts, "Loop pattern types")
 
         if self_loops:
@@ -113,8 +119,12 @@ def _render_analyser_response(response: Any, method: str) -> None:
             st.subheader("Non-self loops")
             st.table(non_self_loops)
 
+        if repeated_patterns:
+            st.subheader("Repeated patterns")
+            st.table(repeated_patterns)
+
         loop_support = {}
-        for item in self_loops + non_self_loops:
+        for item in self_loops + non_self_loops + repeated_patterns:
             loop_support[item.get("pattern", "?")] = float(item.get("support", 0) or 0)
         if loop_support:
             st.markdown("### Loop support by pattern")
@@ -261,6 +271,10 @@ def render(base_url: str) -> None:
             filter_out = st.checkbox("Filter out rare loops", value=False)
             top_k = parse_optional_int(st.text_input("Top K loops", ""))
             trace_based = st.checkbox("Include trace IDs", value=False)
+            repeated_patterns = st.checkbox("Detect repeated patterns (A→B→C … A→B→C)", value=False)
+            max_pattern_window = st.number_input(
+                "Max repeated-pattern window", value=8, min_value=2, disabled=not repeated_patterns
+            )
             analyser_config = {
                 "log_name": log_name,
                 "storage_namespace": storage_namespace,
@@ -271,6 +285,8 @@ def render(base_url: str) -> None:
                 "filter_out": filter_out,
                 "top_k": top_k,
                 "trace_based": trace_based,
+                "repeated_patterns": repeated_patterns,
+                "max_pattern_window": int(max_pattern_window),
                 "return_csv": False,
                 "output_path": f"output/{log_name}_loop_detection",
             }

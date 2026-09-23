@@ -2,6 +2,8 @@ from siesta.core.app import Siesta
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+
 
 """
 API Router for Siesta Framework.
