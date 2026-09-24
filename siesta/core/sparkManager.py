@@ -1,6 +1,7 @@
 from typing import Any, Dict
 from pyspark.sql import SparkSession
 import os
+import sys
 import subprocess
 import zipfile
 from pathlib import Path
@@ -46,6 +47,16 @@ def startup(config: Dict[str, Any] = {}) -> None:
     app_name = config.get("spark_app_name", "SiestaFramework")
     driver_memory = config.get("spark_driver_memory", os.getenv("SPARK_DRIVER_MEMORY", "8g"))
     executor_memory = config.get("spark_executor_memory", os.getenv("SPARK_EXECUTOR_MEMORY", "8g"))
+    executor_cores = config.get("spark_executor_cores", os.getenv("SPARK_EXECUTOR_CORES"))
+    cores_max = config.get("spark_cores_max", os.getenv("SPARK_CORES_MAX"))
+    executor_memory_overhead = config.get("spark_executor_memory_overhead", os.getenv("SPARK_EXECUTOR_MEMORY_OVERHEAD"))
+    shuffle_partitions = config.get("spark_shuffle_partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS"))
+    driver_host = config.get("spark_driver_host", os.getenv("SPARK_DRIVER_HOST"))
+    driver_port = os.getenv("SPARK_DRIVER_PORT")
+    block_manager_port = os.getenv("SPARK_BLOCKMANAGER_PORT")
+    # Local mode runs Python workers on this machine; cluster executors use the Spark image's python3.12
+    default_python = sys.executable if spark_master_url.startswith("local") else "/usr/bin/python3.12"
+    pyspark_python = os.getenv("PYSPARK_PYTHON", default_python)
     
     global spark_session 
     try:
@@ -87,10 +98,9 @@ def startup(config: Dict[str, Any] = {}) -> None:
             .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
             .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-            .config("spark.pyspark.python", "/opt/python/bin/python3") \
-            .config("spark.pyspark.driver.python", "python3") \
-            .config("spark.executorEnv.PYSPARK_PYTHON", "/opt/python/bin/python3") \
-            .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
+            .config("spark.pyspark.python", pyspark_python) \
+            .config("spark.pyspark.driver.python", os.getenv("PYSPARK_DRIVER_PYTHON", pyspark_python)) \
+            .config("spark.executorEnv.PYSPARK_PYTHON", pyspark_python) \
             .config("spark.databricks.delta.optimizeWrite.enabled", "true") \
             .config("spark.databricks.delta.autoCompact.enabled", "true") \
             .config("spark.delta.logStore.class", "org.apache.spark.sql.delta.storage.S3SingleDriverLogStore") \
@@ -99,8 +109,30 @@ def startup(config: Dict[str, Any] = {}) -> None:
             .config("spark.jars.packages", packages) \
             .config("spark.sql.adaptive.enabled", "true") \
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-            .config("spark.sql.adaptive.coalescePartitions.minPartitionNum", "6") \
+            .config("spark.sql.adaptive.coalescePartitions.minPartitionNum", str(cores_max or 6)) \
             .config("spark.sql.execution.pyspark.udf.faulthandler.enabled", "true")
+
+        # Optional cluster sizing (used for scalability experiments; unset in local mode)
+        if executor_cores:
+            builder = builder.config("spark.executor.cores", str(executor_cores))
+        if cores_max:
+            builder = builder.config("spark.cores.max", str(cores_max))
+        if executor_memory_overhead:
+            builder = builder.config("spark.executor.memoryOverhead", executor_memory_overhead)
+        if shuffle_partitions:
+            builder = builder \
+                .config("spark.sql.shuffle.partitions", str(shuffle_partitions)) \
+                .config("spark.default.parallelism", str(shuffle_partitions))
+
+        # Driver networking: executors on other swarm nodes must reach the driver
+        if driver_host:
+            builder = builder \
+                .config("spark.driver.host", driver_host) \
+                .config("spark.driver.bindAddress", "0.0.0.0")
+        if driver_port:
+            builder = builder.config("spark.driver.port", driver_port)
+        if block_manager_port:
+            builder = builder.config("spark.blockManager.port", block_manager_port)
 
         if os.getenv("SPARK_IVY_DIR"):
             builder = builder.config("spark.jars.ivy", os.getenv("SPARK_IVY_DIR"))
@@ -124,6 +156,15 @@ def startup(config: Dict[str, Any] = {}) -> None:
         spark_session = builder.getOrCreate()
         spark_session.sparkContext.setLogLevel("ERROR")
         logger.info(f"SparkSession initialized and connected to Spark Master at {spark_master_url}.")
+        conf = spark_session.sparkContext.getConf()
+        logger.info(
+            "Spark resources: cores.max=%s, executor.cores=%s, executor.memory=%s, executor.memoryOverhead=%s, shuffle.partitions=%s",
+            conf.get("spark.cores.max", "unset"),
+            conf.get("spark.executor.cores", "unset"),
+            conf.get("spark.executor.memory", "unset"),
+            conf.get("spark.executor.memoryOverhead", "unset"),
+            conf.get("spark.sql.shuffle.partitions", "unset"),
+        )
         
         # Ship code to executors
         try:
