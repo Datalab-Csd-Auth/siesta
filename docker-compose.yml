@@ -96,7 +96,7 @@ services:
         - SPARK_SUBMIT_OPTS=-Dlog4j.configurationFile=/opt/spark/conf/log4j2.properties
         - PYSPARK_PYTHON=/usr/bin/python3.12
         - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-12}
-        - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-8G}
+        - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-12G}
     command:
       - /opt/spark/bin/spark-class
       - org.apache.spark.deploy.worker.Worker
@@ -126,7 +126,7 @@ services:
         - SPARK_SUBMIT_OPTS=-Dlog4j.configurationFile=/opt/spark/conf/log4j2.properties
         - PYSPARK_PYTHON=/usr/bin/python3.12
         - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-12}
-        - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-8G}
+        - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-12G}
     command:
       - /opt/spark/bin/spark-class
       - org.apache.spark.deploy.worker.Worker

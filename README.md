@@ -124,13 +124,19 @@ This starts:
 ### Spark: default vs. distributed execution
 
 By default, `docker-compose.yml` runs Spark standalone on a single host: `spark-master` plus
-`spark-worker`/`spark-worker2`, each with 12 cores / 8G (override via `SPARK_WORKER_CORES` /
-`SPARK_WORKER_MEMORY`). The `siesta-api` service leaves driver/executor sizing
-(`SPARK_DRIVER_MEMORY`, `SPARK_EXECUTOR_MEMORY`, `SPARK_EXECUTOR_CORES`, `SPARK_CORES_MAX`,
-`SPARK_SHUFFLE_PARTITIONS`, driver host/port) commented out, so `sparkManager.py` falls back to
-its own defaults — this is what "non-distributed" mode relies on. To tune sizing on this same
-single-host setup, uncomment and adjust those lines (they're pre-filled with the values used for
-real multi-node scaling, as a reference).
+`spark-worker`/`spark-worker2`, each with 12 cores / 12G (override via `SPARK_WORKER_CORES` /
+`SPARK_WORKER_MEMORY`).
+
+`sparkManager.py` resolves each Spark setting in this order: key in the `SIESTA_CONFIG` JSON →
+`SPARK_*` env var → built-in default. With the default `config/siesta.docker.config.json`:
+- driver memory `12g` and executor memory `10g` come from the JSON (`spark_driver_memory`,
+  `spark_executor_memory`), so the matching env vars have no effect unless you remove those keys;
+- executor cores, max cores, memory overhead, shuffle partitions and driver host/port are unset,
+  so Spark's own defaults apply (one executor per worker using all its cores).
+
+The `SPARK_*` lines in the `siesta-api` service are commented out and pre-filled with the values
+used for multi-node scaling, as a reference. Uncomment and adjust them to tune sizing on a single
+host.
 
 For true distributed execution across multiple machines, use `docker-compose-com.yml` instead: a
 Docker Swarm stack (see the comment block at the top of that file for image registry setup and
