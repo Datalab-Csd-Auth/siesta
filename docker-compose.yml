@@ -21,6 +21,19 @@ services:
       - SPARK_USER=spark
       - MPLCONFIGDIR=/tmp/matplotlib
       - SPARK_IVY_DIR=/tmp/.ivy2
+      # Optional distributed-execution tuning (see sparkManager.py). Commented out so
+      # local/non-distributed runs are unaffected; values below are copied from
+      # docker-compose-com.yml and are sized for that cluster's hardware, so adjust
+      # them for this machine's workers before uncommenting.
+      # - SPARK_DRIVER_HOST=siesta-api
+      # - SPARK_DRIVER_PORT=7078
+      # - SPARK_BLOCKMANAGER_PORT=7079
+      # - SPARK_DRIVER_MEMORY=24g
+      # - SPARK_EXECUTOR_MEMORY=7g
+      # - SPARK_EXECUTOR_CORES=2
+      # - SPARK_EXECUTOR_MEMORY_OVERHEAD=1536m
+      # - SPARK_CORES_MAX=18
+      # - SPARK_SHUFFLE_PARTITIONS=72
     volumes:
       - .:/workspace
       - spark-ivy-cache:/tmp/.ivy2
@@ -82,16 +95,14 @@ services:
         - SPARK_USER=spark
         - SPARK_SUBMIT_OPTS=-Dlog4j.configurationFile=/opt/spark/conf/log4j2.properties
         - PYSPARK_PYTHON=/usr/bin/python3.12
+        - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-12}
+        - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-8G}
     command:
       - /opt/spark/bin/spark-class
       - org.apache.spark.deploy.worker.Worker
       - spark://spark-master:7077
       - --webui-port
       - '8082'
-      - --cores
-      - '12'
-      - --memory
-      - 8G
     ports:
       - '8082:8082'
     networks:
@@ -114,16 +125,14 @@ services:
         - SPARK_USER=spark
         - SPARK_SUBMIT_OPTS=-Dlog4j.configurationFile=/opt/spark/conf/log4j2.properties
         - PYSPARK_PYTHON=/usr/bin/python3.12
+        - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-12}
+        - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-8G}
     command:
       - /opt/spark/bin/spark-class
       - org.apache.spark.deploy.worker.Worker
       - spark://spark-master:7077
       - --webui-port
       - '8083'
-      - --cores
-      - '12'
-      - --memory
-      - 8G
     ports:
       - '9084:9084'
     networks:

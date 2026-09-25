@@ -121,6 +121,23 @@ This starts:
 - `Spark/`: Spark image and logging config.
 - `Kafka/`: Kafka image and startup script.
 
+### Spark: default vs. distributed execution
+
+By default, `docker-compose.yml` runs Spark standalone on a single host: `spark-master` plus
+`spark-worker`/`spark-worker2`, each with 12 cores / 8G (override via `SPARK_WORKER_CORES` /
+`SPARK_WORKER_MEMORY`). The `siesta-api` service leaves driver/executor sizing
+(`SPARK_DRIVER_MEMORY`, `SPARK_EXECUTOR_MEMORY`, `SPARK_EXECUTOR_CORES`, `SPARK_CORES_MAX`,
+`SPARK_SHUFFLE_PARTITIONS`, driver host/port) commented out, so `sparkManager.py` falls back to
+its own defaults — this is what "non-distributed" mode relies on. To tune sizing on this same
+single-host setup, uncomment and adjust those lines (they're pre-filled with the values used for
+real multi-node scaling, as a reference).
+
+For true distributed execution across multiple machines, use `docker-compose-com.yml` instead: a
+Docker Swarm stack (see the comment block at the top of that file for image registry setup and
+deploy commands) that runs `siesta-api`/`spark-master` on one leader node and one `spark-worker`
+replica per worker node, with the same `SPARK_*` env vars controlling executor/driver sizing
+across the cluster, e.g. `SPARK_CORES_MAX=18 docker stack deploy -c docker-compose-com.yml siesta`.
+
 ## Extending Siesta (developer hints)
 
 ### Add a new module
