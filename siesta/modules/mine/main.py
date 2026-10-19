@@ -35,8 +35,10 @@ class MiningConfig(BaseModel):
     categories: list[str] = Field(["*"], description="Constraint categories: 'positional', 'existential', 'ordered', 'unordered', 'negation', or '*' for all")
     grouping: str = Field("trace", description="Grouping strategy: 'trace' or 'window'")
     window_size: int = Field(30, description="Position-based window size when grouping='window'")
-    support_threshold: float = Field(0.0, description="Minimum support fraction [0,1] to retain constraints")
-    confidence_threshold: float = Field(0.0, description="Minimum confidence fraction [0,1] to retain constraints")
+    support_threshold: float = Field(0.02, description="Minimum support fraction [0,1] to retain constraints")
+    max_support_threshold: float | None = Field(0.999, description="Maximum support fraction [0,1] to retain constraints; null = no upper bound")
+    confidence_threshold: float = Field(0.95, description="Minimum confidence fraction [0,1] to retain constraints")
+    max_confidence_threshold: float | None = Field(0.999, description="Maximum confidence fraction [0,1] to retain constraints; null = no upper bound")
     interest_threshold: float = Field(0.0, description="Minimum interest fraction [0,1] to retain constraints")
     include_trace_lists: bool = Field(False, description="Append a pipe-delimited trace_ids column per constraint")
     force_recompute: bool = Field(False, description="Remine all traces ignoring previous mining state")
@@ -149,7 +151,10 @@ class Mining(SiestaModule):
                 "categories": ["*"],
                 "grouping": "trace",
                 "window_size": 30,
-                "support_threshold": 0.0,
+                "support_threshold": 0.02,
+                "max_support_threshold": 0.999,
+                "confidence_threshold": 0.95,
+                "max_confidence_threshold": 0.999,
                 "include_trace_lists": False,
                 "force_recompute": False,
             },
@@ -170,8 +175,10 @@ class Mining(SiestaModule):
             `"*"` = all. Options: `"positional"`, `"existential"`, `"ordered"`, `"unordered"`, `"negation"`.
         - `grouping` *(str, default: `"trace"`)* - grouping strategy: `"trace"` or `"window"`.
         - `window_size` *(int, default: `30`)* - position-based window size when `grouping="window"`.
-        - `support_threshold` *(float [0,1], default: `0.0`)* - minimum support fraction to retain constraints.
-        - `confidence_threshold` *(float [0,1], default: `0.0`)* - minimum confidence fraction to retain constraints.
+        - `support_threshold` *(float [0,1], default: `0.02`)* - minimum support fraction to retain constraints.
+        - `max_support_threshold` *(float [0,1] | null, default: `0.999`)* - maximum support fraction to retain constraints. `null` = no upper bound.
+        - `confidence_threshold` *(float [0,1], default: `0.95`)* - minimum confidence fraction to retain constraints.
+        - `max_confidence_threshold` *(float [0,1] | null, default: `0.999`)* - maximum confidence fraction to retain constraints. `null` = no upper bound.
         - `interest_threshold` *(float [0,1], default: `0.0`)* - minimum interest fraction to retain constraints.
         - `include_trace_lists` *(bool, default: `false`)* - append a pipe-delimited `trace_ids` column per constraint.
         - `force_recompute` *(bool, default: `false`)* - remine all traces ignoring previous mining state.
@@ -637,6 +644,12 @@ class Mining(SiestaModule):
         if not set(self.mining_config["categories"]).issubset(valid_categories):
             raise ValueError(f"Invalid categories specified in mining_config: {self.mining_config['categories']}. Valid options are: {valid_categories}.")
 
+        for metric in ("support", "confidence"):
+            low = self.mining_config.get(f"{metric}_threshold", 0.0)
+            high = self.mining_config.get(f"max_{metric}_threshold")
+            if high is not None and high < low:
+                raise ValueError(f"max_{metric}_threshold ({high}) is below {metric}_threshold ({low}).")
+
         # If the caller left output_path at its default, derive it from log_name instead.
         if config.get("output_path") is None or config.get("output_path") == "output/example_log":
             config["output_path"] = "output/" + config.get("log_name", "mining_results")
@@ -1082,6 +1095,9 @@ class Mining(SiestaModule):
             grouped_constraints = grouped_constraints.unionByName(grouped_pre)
 
         grouped_constraints = grouped_constraints.filter(F.col("support") >= self.mining_config.get("support_threshold", 0.0))
+        max_support = self.mining_config.get("max_support_threshold")
+        if max_support is not None:
+            grouped_constraints = grouped_constraints.filter(F.col("support") <= max_support)
 
         # Calculate confidence:
         #   for ordered: #traces_ab / #traces_a                          (P(target|source))
@@ -1122,6 +1138,9 @@ class Mining(SiestaModule):
         )
 
         grouped_constraints = grouped_constraints.filter(F.col("confidence") >= self.mining_config.get("confidence_threshold", 0.0))
+        max_confidence = self.mining_config.get("max_confidence_threshold")
+        if max_confidence is not None:
+            grouped_constraints = grouped_constraints.filter(F.col("confidence") <= max_confidence)
 
         # Calculate interest = support(rule) / (expected support under independence).
         # For positive-event categories the independence baseline is P(source) * P(target).

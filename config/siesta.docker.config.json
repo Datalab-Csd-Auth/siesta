@@ -9,7 +9,7 @@
   "spark_master": "spark://spark-master:7077",
   "spark_app_name": "SiestaFramework",
   "spark_driver_memory": "12g",
-  "spark_executor_memory": "10g",
+  "spark_executor_memory": "6G",
   "kafka_bootstrap_servers": "kafka:9092",
   "raw_events_dir": "raw_events",
   "checkpoint_dir": "checkpoints",
