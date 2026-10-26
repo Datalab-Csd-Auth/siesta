@@ -114,7 +114,7 @@ SIESTA_CONFIG=/workspace/config/siesta.docker.config.json docker compose up --bu
 ```
 
 This starts:
-- `siesta-api`
+- `siesta-api` in localhost:8000
 - `spark-master`, `spark-worker`, `spark-worker2`
 - `minio`
 - `kafka`, `zookeeper`
