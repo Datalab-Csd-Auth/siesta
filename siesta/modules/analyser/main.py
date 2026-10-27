@@ -3,32 +3,24 @@ import csv
 import datetime
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict
 from fastapi import Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
-from pyspark.sql import SparkSession, functions as F
+from pyspark.sql import SparkSession
 
 from siesta.core.config import get_system_config
 from siesta.core.interfaces import SiestaModule, StorageManager
 from siesta.core.storageFactory import get_storage_manager
 from siesta.model.StorageModel import MetaData
 
-from siesta.modules.analyser.directly_follows import compute_directly_follows
-from siesta.modules.analyser.loop_detection import compute_loop_detection
-from siesta.modules.analyser.durations import compute_activity_durations, compute_group_durations
-from siesta.modules.analyser.attribute_deviations import (
-    compute_attribute_deviations, render_html, ALL_STEPS,
+from siesta.modules.analyser.attribute_deviations import ALL_STEPS
+from siesta.modules.analyser.processing import (
+    run_directly_follows, run_loop_detection, write_loop_detection_json, run_durations,
+    run_attribute_deviations, write_attribute_deviations_json, run_ngrams, run_rare_rules,
+    run_targeted_rules, run_process_model, run_bottlenecks, run_temporal_deviations,
 )
-from siesta.modules.analyser.ngrams import discover_ngrams, save_ngram_results, create_network
-from siesta.modules.analyser.dm import discover_rare_rules, discover_targeted_rules, save_dm_results
-from siesta.modules.analyser.trace_labels import resolve_trace_labels
-from siesta.modules.analyser.process_model import discover_process_model, compute_activity_durations_map
-from siesta.modules.analyser.bottlenecks import compute_bottlenecks
-from siesta.modules.analyser.temporal_deviations import compute_temporal_deviations
-from siesta.modules.mine.ordered import discover_ordered
 
 
 class DirectlyFollowsConfig(BaseModel):
@@ -189,14 +181,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _parse_min_timestamp(iso_str: str | None) -> int | None:
-    """Parse an ISO 8601 datetime string to epoch milliseconds, or return None."""
-    if iso_str is None:
-        return None
-    parsed = datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-    return int(parsed.timestamp() * 1000)
-
-
 DEFAULT_ANALYSER_CONFIG: Dict[str, Any] = {
     **DirectlyFollowsConfig().model_dump(),
     **LoopDetectionConfig().model_dump(),
@@ -292,7 +276,7 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_directly_follows(caller="api")
+        return self._csv_response(run_directly_follows(self.analyser_config, self.storage), self.analyser_config.get("return_csv", False))
 
     def api_durations(self, analyser_config: Annotated[DurationsConfig, Body(openapi_examples={
         "default": {
@@ -341,7 +325,7 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_durations(caller="api")
+        return self._csv_response(run_durations(self.analyser_config, self.storage), self.analyser_config.get("return_csv", False))
 
     def api_loop_detection(self, analyser_config: Annotated[LoopDetectionConfig, Body(openapi_examples={
         "default": {
@@ -409,7 +393,7 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_loop_detection(caller="api")
+        return {"code": 200, **run_loop_detection(self.analyser_config, self.storage)}
 
     def api_attribute_deviations(self, analyser_config: Annotated[AttributeDeviationsConfig, Body(openapi_examples={
         "default": {
@@ -476,7 +460,13 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_attribute_deviations(caller="api")
+        result, output_path = run_attribute_deviations(self.analyser_config, self.storage)
+        output_format = self.analyser_config.get("output_format", "json")
+        if output_format == "csv":
+            return FileResponse(output_path, media_type="text/csv", filename=Path(output_path).name)
+        if output_format == "html":
+            return FileResponse(output_path, media_type="text/html", filename=Path(output_path).name)
+        return result
 
     # ------------------------------------------------------------------
     # API entry points - comparison (from the former `compare` module)
@@ -522,7 +512,7 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_ngrams(caller="api")
+        return self._csv_response(run_ngrams(self.analyser_config, self.storage), return_csv=False)
 
     def api_rare_rules(self, analyser_config: Annotated[ComparisonConfig, Body(
         openapi_examples={
@@ -562,7 +552,8 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_rare_rules(caller="api")
+        result_list, _ = run_rare_rules(self.analyser_config, self.storage)
+        return {"code": 200, "data": result_list}
 
     def api_targeted_rules(self, analyser_config: Annotated[ComparisonConfig, Body(
         openapi_examples={
@@ -603,7 +594,8 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_targeted_rules(caller="api")
+        result_list, _ = run_targeted_rules(self.analyser_config, self.storage)
+        return {"code": 200, "data": result_list}
 
     # ------------------------------------------------------------------
     # API entry points - process model discovery (from the former `model` module)
@@ -648,7 +640,7 @@ class Analyser(SiestaModule):
             logger.error(f"Invalid config for dfg_model: {e}")
             return {"code": 400, "message": str(e)}
 
-        return self._run_process_model(caller="api", algo="dfg")
+        return self._model_api_response(*run_process_model(self.analyser_config, self.storage, algo="dfg"))
 
     def api_bpmn(self, analyser_config: Annotated[ProcessModelConfig, Body(openapi_examples={
         "default": {
@@ -679,7 +671,7 @@ class Analyser(SiestaModule):
             logger.error(f"Invalid config for bpmn: {e}")
             return {"code": 400, "message": str(e)}
 
-        return self._run_process_model(caller="api", algo="bpmn")
+        return self._model_api_response(*run_process_model(self.analyser_config, self.storage, algo="bpmn"))
 
     def api_petri_net(self, analyser_config: Annotated[ProcessModelConfig, Body(openapi_examples={
         "default": {
@@ -710,7 +702,7 @@ class Analyser(SiestaModule):
             logger.error(f"Invalid config for petri_net: {e}")
             return {"code": 400, "message": str(e)}
 
-        return self._run_process_model(caller="api", algo="petri_net")
+        return self._model_api_response(*run_process_model(self.analyser_config, self.storage, algo="petri_net"))
 
     # ------------------------------------------------------------------
     # API entry points - new analytics
@@ -770,7 +762,7 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_bottlenecks(caller="api")
+        return self._csv_response(run_bottlenecks(self.analyser_config, self.storage), self.analyser_config.get("return_csv", False))
 
     def api_temporal_deviations(self, analyser_config: Annotated[TemporalDeviationsConfig, Body(openapi_examples={
         "default": {
@@ -817,7 +809,7 @@ class Analyser(SiestaModule):
             logger.exception(f"Error loading analyser config: {e}")
             return {"code": 400, "message": f"Invalid config: {e}"}
 
-        return self._run_temporal_deviations(caller="api")
+        return self._csv_response(run_temporal_deviations(self.analyser_config, self.storage), self.analyser_config.get("return_csv", False))
 
     # ------------------------------------------------------------------
     # CLI entry point
@@ -853,29 +845,37 @@ class Analyser(SiestaModule):
         method = self.analyser_config.get("method", "directly_follows")
         match method:
             case "directly_follows":
-                return self._run_directly_follows(caller="cli")
+                return run_directly_follows(self.analyser_config, self.storage)
             case "loop_detection":
-                return self._run_loop_detection(caller="cli")
+                return write_loop_detection_json(run_loop_detection(self.analyser_config, self.storage), self.analyser_config)
             case "durations":
-                return self._run_durations(caller="cli")
+                return run_durations(self.analyser_config, self.storage)
             case "attribute_deviations":
-                return self._run_attribute_deviations(caller="cli")
+                result, output_path = run_attribute_deviations(self.analyser_config, self.storage)
+                if result is None:
+                    return output_path
+                return write_attribute_deviations_json(result, self.analyser_config)
             case "ngrams":
-                return self._run_ngrams(caller="cli")
+                return run_ngrams(self.analyser_config, self.storage)
             case "rare_rules":
-                return self._run_rare_rules(caller="cli")
+                _, output_path = run_rare_rules(self.analyser_config, self.storage)
+                return output_path
             case "targeted_rules":
-                return self._run_targeted_rules(caller="cli")
+                _, output_path = run_targeted_rules(self.analyser_config, self.storage)
+                return output_path
             case "dfg_model":
-                return self._run_process_model(caller="cli", algo="dfg")
+                model_out, _, _ = run_process_model(self.analyser_config, self.storage, algo="dfg")
+                return model_out
             case "bpmn":
-                return self._run_process_model(caller="cli", algo="bpmn")
+                model_out, _, _ = run_process_model(self.analyser_config, self.storage, algo="bpmn")
+                return model_out
             case "petri_net":
-                return self._run_process_model(caller="cli", algo="petri_net")
+                model_out, _, _ = run_process_model(self.analyser_config, self.storage, algo="petri_net")
+                return model_out
             case "bottlenecks":
-                return self._run_bottlenecks(caller="cli")
+                return run_bottlenecks(self.analyser_config, self.storage)
             case "temporal_deviations":
-                return self._run_temporal_deviations(caller="cli")
+                return run_temporal_deviations(self.analyser_config, self.storage)
             case _:
                 raise ValueError(f"Unknown analyser method: '{method}'")
 
@@ -906,436 +906,19 @@ class Analyser(SiestaModule):
             given_output + "_" + str(datetime.datetime.now().timestamp())
         )
 
-    def _load_metadata(self):
-        self.metadata = MetaData(
-            storage_namespace=self.analyser_config.get("storage_namespace", "siesta"),
-            log_name=self.analyser_config.get("log_name", "default_log"),
-            storage_type=self.analyser_config.get("storage_type", "s3"),
-        )
-        self.metadata = self.storage.read_metadata_table(self.metadata)
-
     # ------------------------------------------------------------------
-    # Method implementations - core analysis
+    # Response shaping
     # ------------------------------------------------------------------
 
-    def _run_directly_follows(self, caller: str) -> Any:
-        logger.info(f"Running directly_follows initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        result_df = compute_directly_follows(
-            events_df=events_df,
-            trace_count=self.metadata.trace_count,
-            end_time=self.analyser_config.get("end_time"),
-            support_threshold=self.analyser_config.get("support_threshold"),
-            filter_out=self.analyser_config.get("filter_out", False),
-            include_traces=self.analyser_config.get("include_traces", False),
-        )
-
-        output_path = self.analyser_config["output_path"] + ".csv"
-        self.analyser_config["output_path"] = output_path
-
-        result_pd = result_df.toPandas()
-        if self.analyser_config.get("include_traces", False) and "trace_ids" in result_pd.columns:
-            result_pd["trace_ids"] = result_pd["trace_ids"].apply(
-                lambda x: ",".join(sorted(x)) if x else ""
-            )
-        result_pd.to_csv(output_path, index=False)
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            if self.analyser_config.get("return_csv", False):
-                return FileResponse(
-                    output_path,
-                    media_type="text/csv",
-                    filename=Path(output_path).name,
-                )
-            with open(output_path, "r", newline="") as f:
-                try:
-                    return {"code": 200, "data": list(csv.DictReader(f))}
-                except Exception:
-                    logger.error(f"Failed to parse results from {output_path}.")
-                    return {"code": 500, "message": f"Failed to parse results from {output_path}."}
-
-        return output_path
-
-    def _run_loop_detection(self, caller: str) -> Any:
-        logger.info(f"Running loop_detection initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        events_df.cache()
-
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-
-        result = compute_loop_detection(
-            events_df=events_df,
-            grouping_key=self.analyser_config.get("grouping_key"),
-            grouping_value=self.analyser_config.get("grouping_value"),
-            support_threshold=self.analyser_config.get("support_threshold"),
-            filter_out=self.analyser_config.get("filter_out", False),
-            top_k=self.analyser_config.get("top_k"),
-            trace_based=self.analyser_config.get("trace_based", False),
-            max_pattern_length=self.analyser_config.get("max_pattern_length", 8),
-            include_repeats=self.analyser_config.get("include_repeats", True),
-            with_time_stats=self.analyser_config.get("with_time_stats", True),
-            with_distribution=self.analyser_config.get("with_distribution", False),
-        )
-
-        events_df.unpersist()
-        logger.info(
-            f"Completed. Found {len(result['self_loops'])} self-loop type(s), "
-            f"{len(result['non_self_loops'])} non-self-loop type(s), and "
-            f"{len(result['repeated_patterns'])} repeated-pattern type(s)."
-        )
-
-        if caller == "cli":
-            output_path = self.analyser_config["output_path"] + ".json"
-            self.analyser_config["output_path"] = output_path
-            with open(output_path, "w") as f:
-                json.dump(result, f, indent=2)
-            logger.info(f"Results written to {output_path}.")
-            return output_path
-
-        return {"code": 200, **result}
-
-    def _run_durations(self, caller: str) -> Any:
-        logger.info(f"Running durations initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        mode         = self.analyser_config.get("duration_mode", "activity")
-        end_time     = self.analyser_config.get("end_time")
-        grouping_key = self.analyser_config.get("grouping_key")
-        grouping_val = self.analyser_config.get("grouping_value")
-
-        if mode == "group":
-            result_df = compute_group_durations(
-                events_df=events_df,
-                end_time=end_time,
-                grouping_key=grouping_key,
-                grouping_value=grouping_val,
-            )
-        else:
-            result_df = compute_activity_durations(
-                events_df=events_df,
-                end_time=end_time,
-                grouping_key=grouping_key,
-                grouping_value=grouping_val,
-                per_group=self.analyser_config.get("per_group", False),
-            )
-
-        output_path = self.analyser_config["output_path"] + ".csv"
-        self.analyser_config["output_path"] = output_path
-
-        result_df.toPandas().to_csv(output_path, index=False)
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            if self.analyser_config.get("return_csv", False):
-                return FileResponse(
-                    output_path,
-                    media_type="text/csv",
-                    filename=Path(output_path).name,
-                )
-            with open(output_path, "r", newline="") as f:
-                try:
-                    return {"code": 200, "data": list(csv.DictReader(f))}
-                except Exception:
-                    logger.error(f"Failed to parse results from {output_path}.")
-                    return {"code": 500, "message": f"Failed to parse results from {output_path}."}
-
-        return output_path
-
-    def _run_attribute_deviations(self, caller: str) -> Any:
-        logger.info(f"Running attribute_deviations initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-        total_traces = self.metadata.trace_count
-
-        rare_support_threshold = self.analyser_config.get("on_rare")
-        if rare_support_threshold is not None:
-            logger.info(
-                "on_rare set: discovering ordered constraints and filtering to non-satisfying traces "
-                f"for support >= {rare_support_threshold}."
-            )
-
-            ordered_constraints = discover_ordered(events_df, self.metadata).select(
-                "template", "source", "target", "trace_id"
-            ).cache()
-
-            high_supported = (
-                ordered_constraints
-                .groupBy("template", "source", "target")
-                .agg(F.countDistinct("trace_id").alias("support_count"))
-                .withColumn("support", F.col("support_count") / F.lit(self.metadata.trace_count))
-                .filter(F.col("support") >= F.lit(float(rare_support_threshold)))
-                .select("template", "source", "target")
-            )
-
-            high_constraint_count = high_supported.count()
-            if high_constraint_count > 0:
-                satisfied_counts = (
-                    ordered_constraints
-                    .join(F.broadcast(high_supported), on=["template", "source", "target"], how="inner")
-                    .select("trace_id", "template", "source", "target")
-                    .distinct()
-                    .groupBy("trace_id")
-                    .agg(F.count(F.lit(1)).alias("satisfied_high_constraints"))
-                )
-
-                rare_trace_ids = (
-                    events_df
-                    .select("trace_id")
-                    .distinct()
-                    .join(satisfied_counts, on="trace_id", how="left")
-                    .fillna({"satisfied_high_constraints": 0})
-                    .filter(F.col("satisfied_high_constraints") < F.lit(high_constraint_count))
-                    .select("trace_id")
-                )
-
-                filtered_events_df = events_df.join(F.broadcast(rare_trace_ids), on="trace_id", how="inner")
-                filtered_events_df.cache()
-                events_df.unpersist()
-                events_df = filtered_events_df
-
-                total_traces = rare_trace_ids.count()
-                logger.info(
-                    f"on_rare set: selected {total_traces} non-satisfying trace(s) "
-                    f"out of {self.metadata.trace_count}."
-                )
-            else:
-                logger.info(
-                    "on_rare set: no high-support ordered constraints found; "
-                    "running deviations on all traces."
-                )
-
-            ordered_constraints.unpersist()
-
-        records, active_steps = compute_attribute_deviations(
-            events_df=events_df,
-            total_traces=total_traces,
-            steps=self.analyser_config.get("steps", list(ALL_STEPS)),
-            excluded_keys=self.analyser_config.get("excluded_attributes"),
-            surprise_threshold=self.analyser_config.get("surprise_threshold", 4.0),
-            zscore_threshold=self.analyser_config.get("zscore_threshold", 3.5),
-            n_buckets=self.analyser_config.get("n_buckets", 5),
-            ngram_n=self.analyser_config.get("ngram_n", 2),
-            min_group_size=self.analyser_config.get("min_group_size", 5),
-            support_threshold=self.analyser_config.get("support_threshold"),
-            filter_out=self.analyser_config.get("filter_out", False),
-        )
-
-        events_df.unpersist()
-        logger.info(f"Completed. {len(records)} deviation records found.")
-
-        output_format = self.analyser_config.get("output_format", "json")
-        log_name = self.analyser_config.get("log_name", "log")
-
-        if output_format == "csv":
-            import csv as _csv
-            output_path = self.analyser_config["output_path"] + "_deviations.csv"
-            with open(output_path, "w", newline="", encoding="utf-8") as f:
-                if records:
-                    all_step_keys: set = set()
-                    for rec in records:
-                        all_step_keys.update(rec.get("scores", {}).keys())
-                    flat = []
-                    for rec in records:
-                        row = {k: v for k, v in rec.items() if k not in ("flagged_by", "scores")}
-                        row["flagged_by"] = "|".join(rec.get("flagged_by", []))
-                        for sk in sorted(all_step_keys):
-                            row[f"score_{sk}"] = rec["scores"].get(sk, "")
-                        flat.append(row)
-                    writer = _csv.DictWriter(f, fieldnames=list(flat[0].keys()))
-                    writer.writeheader()
-                    writer.writerows(flat)
-            if caller == "api":
-                return FileResponse(output_path, media_type="text/csv", filename=Path(output_path).name)
-            return output_path
-
-        if output_format == "html":
-            output_path = self.analyser_config["output_path"] + "_deviations.html"
-            html_content = render_html(records, log_name, active_steps)
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(html_content)
-            if caller == "api":
-                return FileResponse(output_path, media_type="text/html", filename=Path(output_path).name)
-            return output_path
-
-        # Default: JSON
-        result = {
-            "code": 200,
-            "log_name": log_name,
-            "total_deviations": len(records),
-            "deviations": records,
-        }
-        if caller == "cli":
-            output_path = self.analyser_config["output_path"] + "_deviations.json"
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(result, f, indent=2)
-            logger.info(f"Results written to {output_path}.")
-            return output_path
-        return result
-
-    # ------------------------------------------------------------------
-    # Method implementations - comparison
-    # ------------------------------------------------------------------
-
-    def _run_ngrams(self, caller: str) -> Any:
-        logger.info(f"Running ngrams initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata).dropDuplicates(
-            ["trace_id", "activity", "start_timestamp"]
-        )
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        trace_labels = resolve_trace_labels(
-            events_df,
-            self.analyser_config.get("separating_key", "activity"),
-            self.analyser_config.get("separating_groups", []),
-        )
-        params = self.analyser_config.get("method_params", {})
-
-        results = discover_ngrams(events=events_df, trace_labels=trace_labels, n=params.get("n", 2))
-
-        output_path = self.analyser_config["output_path"] + ".csv"
-        self.analyser_config["output_path"] = output_path
-        save_ngram_results(results, output_path, fmt="csv")
-
-        if params.get("vis", False):
-            with open(output_path.replace(".csv", ".html"), "w") as f:
-                f.write(create_network(output_path))
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            with open(output_path, "r", newline="") as f:
-                try:
-                    return {"code": 200, "data": list(csv.DictReader(f))}
-                except Exception:
-                    logger.error(f"Failed to parse ngrams results from {output_path}.")
-                    return {"code": 500, "message": f"Failed to parse results from {output_path}."}
-        return output_path
-
-    def _run_rare_rules(self, caller: str) -> Any:
-        logger.info(f"Running rare_rules initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata).dropDuplicates(
-            ["trace_id", "activity", "start_timestamp"]
-        )
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        trace_labels = resolve_trace_labels(
-            events_df,
-            self.analyser_config.get("separating_key", "activity"),
-            self.analyser_config.get("separating_groups", []),
-        )
-
-        ordered_constraints_df = discover_ordered(events_df, self.metadata)
-        result_list = discover_rare_rules(
-            ordered_constraints_df=ordered_constraints_df,
-            trace_labels=trace_labels,
-            trace_count=self.metadata.trace_count,
-            support_pct=self.analyser_config.get("support_threshold", 0.1),
-        )
-
-        output_path = self.analyser_config["output_path"] + ".json"
-        self.analyser_config["output_path"] = output_path
-        save_dm_results(result_list, output_path)
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            return {"code": 200, "data": result_list}
-        return output_path
-
-    def _run_targeted_rules(self, caller: str) -> Any:
-        logger.info(f"Running targeted_rules initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata).dropDuplicates(
-            ["trace_id", "activity", "start_timestamp"]
-        )
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        trace_labels = resolve_trace_labels(
-            events_df,
-            self.analyser_config.get("separating_key", "activity"),
-            self.analyser_config.get("separating_groups", []),
-        )
-        params = self.analyser_config.get("method_params", {})
-
-        ordered_constraints_df = discover_ordered(events_df, self.metadata)
-        result_list = discover_targeted_rules(
-            ordered_constraints_df=ordered_constraints_df,
-            trace_labels=trace_labels,
-            target_label=params.get("target_label", 1),
-            support_threshold=self.analyser_config.get("support_threshold", 0.8),
-            filtering_support=params.get("filtering_support", 1),
-        )
-
-        output_path = self.analyser_config["output_path"] + ".json"
-        self.analyser_config["output_path"] = output_path
-        save_dm_results(result_list, output_path)
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            return {"code": 200, "data": result_list}
-        return output_path
-
-    # ------------------------------------------------------------------
-    # Method implementations - process model discovery
-    # ------------------------------------------------------------------
-
-    def _copy_outputs(self, model_path, fmt, png_path, html_path):
-        base = self.analyser_config["output_path"]
-        model_out = base + "." + fmt
-        png_out   = base + ".png"
-        html_out  = base + ".html"
-        try:
-            for src, dst in [(model_path, model_out), (png_path, png_out), (html_path, html_out)]:
-                if src and os.path.exists(src):
-                    shutil.copy(src, dst)
-        except Exception:
-            logger.exception("Failed to copy model files to output location.")
-        return model_out, png_out, html_out
+    def _csv_response(self, output_path: str, return_csv: bool) -> Any:
+        if return_csv:
+            return FileResponse(output_path, media_type="text/csv", filename=Path(output_path).name)
+        with open(output_path, "r", newline="") as f:
+            try:
+                return {"code": 200, "data": list(csv.DictReader(f))}
+            except Exception:
+                logger.error(f"Failed to parse results from {output_path}.")
+                return {"code": 500, "message": f"Failed to parse results from {output_path}."}
 
     def _model_api_response(self, model_out, png_out, html_out):
         fmt = self.analyser_config.get("output_format", "model")
@@ -1345,123 +928,3 @@ class Analyser(SiestaModule):
             return FileResponse(html_out, media_type="text/html", filename=Path(html_out).name)
         return FileResponse(model_out, media_type="application/octet-stream",
                             filename=Path(model_out).name)
-
-    def _run_process_model(self, caller: str, algo: str) -> Any:
-        logger.info(f"Running process model discovery ({algo}) initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        try:
-            model_path, fmt, png_path, html_path = discover_process_model(
-                events_df,
-                algo=algo,
-                end_time=self.analyser_config.get("end_time"),
-                noise_threshold=self.analyser_config.get("noise_threshold", 0.0),
-            )
-        except Exception:
-            events_df.unpersist()
-            logger.exception(f"Process model discovery ({algo}) failed.")
-            raise
-
-        model_out, png_out, html_out = self._copy_outputs(model_path, fmt, png_path, html_path)
-        events_df.unpersist()
-        logger.info(f"{algo} model -> {model_out}  PNG -> {png_out}  HTML -> {html_out}")
-        self.analyser_config["output_path"] = model_out
-
-        if caller == "api":
-            return self._model_api_response(model_out, png_out, html_out)
-        return model_out
-
-    # ------------------------------------------------------------------
-    # Method implementations - new analytics
-    # ------------------------------------------------------------------
-
-    def _run_bottlenecks(self, caller: str) -> Any:
-        logger.info(f"Running bottlenecks initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        result_df = compute_bottlenecks(
-            events_df=events_df,
-            trace_count=self.metadata.trace_count,
-            end_time=self.analyser_config.get("end_time"),
-            grouping_key=self.analyser_config.get("grouping_key"),
-            grouping_value=self.analyser_config.get("grouping_value"),
-            zscore_threshold=self.analyser_config.get("zscore_threshold", 3.5),
-            top_k=self.analyser_config.get("top_k"),
-            support_threshold=self.analyser_config.get("support_threshold", 0.0),
-            sigma_multiplier=self.analyser_config.get("sigma_multiplier", 3.0),
-            order_by=self.analyser_config.get("order_by", "impact_score"),
-        )
-
-        output_path = self.analyser_config["output_path"] + ".csv"
-        self.analyser_config["output_path"] = output_path
-        result_df.toPandas().to_csv(output_path, index=False)
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            if self.analyser_config.get("return_csv", False):
-                return FileResponse(output_path, media_type="text/csv", filename=Path(output_path).name)
-            with open(output_path, "r", newline="") as f:
-                try:
-                    return {"code": 200, "data": list(csv.DictReader(f))}
-                except Exception:
-                    logger.error(f"Failed to parse results from {output_path}.")
-                    return {"code": 500, "message": f"Failed to parse results from {output_path}."}
-        return output_path
-
-    def _run_temporal_deviations(self, caller: str) -> Any:
-        logger.info(f"Running temporal_deviations initiated by {caller}.")
-        self._load_metadata()
-
-        events_df = self.storage.read_sequence_table(self.metadata)
-        min_ts = _parse_min_timestamp(self.analyser_config.get("min_timestamp"))
-        if min_ts is not None:
-            events_df = events_df.filter(F.col("start_timestamp") >= min_ts)
-        events_df.cache()
-
-        trace_labels = resolve_trace_labels(
-            events_df,
-            self.analyser_config.get("separating_key", "activity"),
-            self.analyser_config.get("separating_groups", []),
-        )
-
-        result_df = compute_temporal_deviations(
-            events_df=events_df,
-            trace_labels=trace_labels,
-            trace_count=self.metadata.trace_count,
-            activity_pairs=self.analyser_config.get("activity_pairs"),
-            max_auto_pairs=self.analyser_config.get("max_auto_pairs", 50),
-            min_group_size=self.analyser_config.get("min_group_size", 5),
-            top_k_per_pair=self.analyser_config.get("top_k_per_pair"),
-        )
-
-        output_path = self.analyser_config["output_path"] + ".csv"
-        self.analyser_config["output_path"] = output_path
-        result_df.toPandas().to_csv(output_path, index=False)
-
-        events_df.unpersist()
-        logger.info(f"Completed. Results written to {output_path}.")
-
-        if caller == "api":
-            if self.analyser_config.get("return_csv", False):
-                return FileResponse(output_path, media_type="text/csv", filename=Path(output_path).name)
-            with open(output_path, "r", newline="") as f:
-                try:
-                    return {"code": 200, "data": list(csv.DictReader(f))}
-                except Exception:
-                    logger.error(f"Failed to parse results from {output_path}.")
-                    return {"code": 500, "message": f"Failed to parse results from {output_path}."}
-        return output_path

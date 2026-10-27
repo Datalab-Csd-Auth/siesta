@@ -1,4 +1,3 @@
-import json
 import re
 from typing import Annotated, Any, Dict
 
@@ -8,9 +7,9 @@ from pyspark.sql import SparkSession
 
 from siesta.core.config import get_system_config
 from siesta.core.interfaces import SiestaModule, StorageManager
-from siesta.core.sparkManager import get_spark_session
 from siesta.core.storageFactory import get_storage_manager
 from siesta.model.StorageModel import MetaData
+from siesta.modules.manager.processing import read_log_metadata, run_adhoc_query, summarize_namespaces
 
 import logging
 
@@ -67,22 +66,7 @@ class Manager(SiestaModule):
         self.siesta_config = get_system_config()
         self.storage = get_storage_manager()
 
-        namespaces = self.storage.list_namespaces()
-        namespace_logs = {
-            namespace: self.storage.list_logs(namespace) for namespace in namespaces
-        }
-
-        return {
-            "namespace_count": len(namespaces),
-            "namespaces": [
-                {
-                    "name": namespace,
-                    "log_count": len(logs),
-                    "logs": logs,
-                }
-                for namespace, logs in namespace_logs.items()
-            ],
-        }
+        return summarize_namespaces(self.storage)
 
     def api_delete_namespace(
         self,
@@ -127,22 +111,7 @@ class Manager(SiestaModule):
         self.storage = get_storage_manager()
 
         metadata = MetaData(storage_namespace=storage_namespace, log_name=log_name)
-        metadata = self.storage.read_metadata_table(metadata)
-
-        result = metadata.to_dict()
-
-        if include_alphabet:
-            result["activity_alphabet"] = sorted(
-                row["activity"]
-                for row in self.storage.read_activity_index(metadata).select("activity").distinct().collect()
-            )
-        if include_indexed_pairs:
-            result["indexed_pairs"] = [
-                {"source": row["source"], "target": row["target"]}
-                for row in self.storage.read_pairs_index(metadata).select("source", "target").distinct().collect()
-            ]
-
-        return result
+        return read_log_metadata(self.storage, metadata, include_alphabet, include_indexed_pairs)
 
     def api_delete_log(
         self,
@@ -217,32 +186,10 @@ class Manager(SiestaModule):
         )
         self.siesta_config = get_system_config()
         self.storage = get_storage_manager()
-        spark = get_spark_session()
 
         sql_text = query_config.sql.strip()
         if not _READ_ONLY_SQL.match(sql_text):
             raise ValueError("Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN statements are permitted.")
 
         metadata = MetaData(storage_namespace=query_config.storage_namespace, log_name=query_config.log_name)
-
-        registered_tables = []
-        for table_name in self.storage.list_tables(metadata):
-            try:
-                self.storage.read_table(metadata, table_name).createOrReplaceTempView(table_name)
-                registered_tables.append(table_name)
-            except Exception as e:
-                logger.warning(f"Skipping table '{table_name}' - could not register as view: {e}")
-
-        try:
-            result_df = spark.sql(sql_text).limit(query_config.row_limit)
-            rows = [json.loads(r) for r in result_df.toJSON().collect()]
-        except Exception as e:
-            logger.exception(f"Ad-hoc query failed: {e}")
-            raise ValueError(f"Query execution failed: {e}")
-
-        return {
-            "columns": result_df.columns,
-            "row_count": len(rows),
-            "rows": rows,
-            "available_tables": registered_tables,
-        }
+        return run_adhoc_query(self.storage, metadata, sql_text, query_config.row_limit)

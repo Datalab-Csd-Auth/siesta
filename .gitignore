@@ -12,6 +12,10 @@ wexperimental
 # C extensions
 *.so
 
+tmp/
+datasets/
+results/
+
 # Distribution / packaging
 .Python
 build/

@@ -14,6 +14,7 @@ import logging
 from siesta.modules.query.processors.detection_query import process_detection_query
 from siesta.modules.query.processors.exploration_query import process_exploration_query
 from siesta.modules.query.processors.stats_query import process_stats_query
+from siesta.modules.query.processing import load_metadata
 
 
 logger = logging.getLogger(__name__)
@@ -227,12 +228,7 @@ class Querying(SiestaModule):
         logger.info(self.query_config)
 
     def _load_metadata(self):
-        self.metadata = MetaData(
-            storage_namespace=self.query_config.get("storage_namespace", "siesta"),
-            log_name=self.query_config.get("log_name", "default_log"),
-            storage_type=self.query_config.get("storage_type", "s3"),
-        )
-        self.metadata = self.storage.read_metadata_table(self.metadata)
+        self.metadata = load_metadata(self.query_config, self.storage)
 
     def _dissect_query(self, config: Dict[str, Any]):
         self._load_metadata()
