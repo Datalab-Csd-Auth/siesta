@@ -17,7 +17,7 @@ def _mine_trace_pandas(pdf: pd.DataFrame) -> pd.DataFrame:
     """
     trace_id = pdf["trace_id"].iloc[0]
     pdf = pdf.sort_values("position").reset_index(drop=True)
-    activities = pdf["activity"].values
+    activities = pdf["activity"].to_numpy()
     n = len(activities)
 
     if n < 2:

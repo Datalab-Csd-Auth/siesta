@@ -412,7 +412,8 @@ class StorageManager(ABC):
         """
         pass
 
-   
+
+    @abstractmethod
     def read_trace_metadata_table(self, metadata: Any) -> DataFrame:
         """
         Read the trace metadata table
@@ -425,6 +426,27 @@ class StorageManager(ABC):
         """
     
   ######################################################################################
+    @abstractmethod
+    def write_positional_constraints(self, metadata: MetaData, df: DataFrame) -> None:
+        """
+        Write positional constraints to storage.
+        """
+        pass
+
+    @abstractmethod
+    def write_existential_constraints(self, metadata: MetaData, df: DataFrame) -> None:
+        """
+        Write existential constraints to storage.
+        """
+        pass
+
+    @abstractmethod
+    def write_ordered_constraints(self, metadata: MetaData, df: DataFrame) -> None:
+        """
+        Write ordered constraints to storage.
+        """
+        pass
+
     @abstractmethod
     def read_existential_constraints(self, metadata: MetaData) -> DataFrame:
         """

@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 
 class IndexConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    log_name: str = Field("example_log", description="Name for the log in storage")
-    log_path: str = Field("../datasets/test.xes", description="Path to the local log file (XES, CSV, or JSON)")
-    storage_namespace: str = Field("siesta", description="Storage namespace / bucket prefix")
-    clear_existing: bool = Field(False, description="Drop and rebuild the existing index")
-    enable_streaming: bool = Field(False, description="Start a Kafka streaming collector instead of batch processing")
-    kafka_topic: str = Field("example_log", description="Kafka topic to consume in streaming mode")
-    lookback: str = Field("7d", description="Lookback window for incremental indexing, e.g. '7d', '30d'")
+    log_name: str = Field(default="example_log", description="Name for the log in storage")
+    log_path: str = Field(default="../datasets/test.xes", description="Path to the local log file (XES, CSV, or JSON)")
+    storage_namespace: str = Field(default="siesta", description="Storage namespace / bucket prefix")
+    clear_existing: bool = Field(default=False, description="Drop and rebuild the existing index")
+    enable_streaming: bool = Field(default=False, description="Start a Kafka streaming collector instead of batch processing")
+    kafka_topic: str = Field(default="example_log", description="Kafka topic to consume in streaming mode")
+    lookback: str = Field(default="7d", description="Lookback window for incremental indexing, e.g. '7d', '30d'")
     field_mappings: dict = Field(default_factory=lambda: {
         "xes": {
             "activity": "concept:name",
@@ -53,7 +53,7 @@ class IndexConfig(BaseModel):
                     "combination of columns rather than a single one.")
     trace_level_fields: list[str] = Field(default_factory=lambda: ["trace_id"], description="Fields extracted at trace level")
     timestamp_fields: list[str] = Field(default_factory=lambda: ["start_timestamp"], description="Fields to parse as Unix epoch seconds")
-    composite_separator: str = Field("::", description="Separator used to join source column values when a field_mappings entry is a list of columns")
+    composite_separator: str = Field(default="::", description="Separator used to join source column values when a field_mappings entry is a list of columns")
 
 
 DEFAULT_INDEX_CONFIG: Dict[str, Any] = IndexConfig().model_dump()

@@ -22,18 +22,18 @@ logger = logging.getLogger(__name__)
 
 class QueryMethodInput(BaseModel):
     model_config = ConfigDict(extra="allow")
-    pattern: str = Field("", description="Pattern string, e.g. 'A B* C' or 'A[pos=?1]+ B[pos=?1+5]'")
-    explore_mode: str = Field("accurate", description="'accurate', 'fast', or 'hybrid'. Used by exploration only")
-    explore_k: int = Field(10, description="Candidates for hybrid exploration (0 = fast mode)")
+    pattern: str = Field(default="", description="Pattern string, e.g. 'A B* C' or 'A[pos=?1]+ B[pos=?1+5]'")
+    explore_mode: str = Field(default="accurate", description="'accurate', 'fast', or 'hybrid'. Used by exploration only")
+    explore_k: int = Field(default=10, description="Candidates for hybrid exploration (0 = fast mode)")
 
 
 class QueryConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    log_name: str = Field("example_log", description="Name of the indexed log")
-    storage_namespace: str = Field("siesta", description="Storage namespace")
-    method: str = Field("statistics", description="'statistics', 'detection', or 'exploration'. Ignored by API endpoints - set automatically.")
+    log_name: str = Field(default="example_log", description="Name of the indexed log")
+    storage_namespace: str = Field(default="siesta", description="Storage namespace")
+    method: str = Field(default="statistics", description="'statistics', 'detection', or 'exploration'. Ignored by API endpoints - set automatically.")
     query: QueryMethodInput = Field(default_factory=QueryMethodInput, description="Query-specific parameters")
-    support_threshold: float = Field(0.0, description="Minimum support fraction [0,1] for results")
+    support_threshold: float = Field(default=0.0, description="Minimum support fraction [0,1] for results")
 
 
 DEFAULT_QUERY_CONFIG: Dict[str, Any] = QueryConfig().model_dump()
@@ -49,7 +49,7 @@ class Querying(SiestaModule):
     storage: StorageManager
     siesta_config: Dict[str, Any]
     query_config: Dict[str, Any]
-    metadata: MetaData | None
+    metadata: MetaData
 
     def startup(self):
         logger.info(f"{self.name} v{self.version} initialized.")

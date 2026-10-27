@@ -20,21 +20,21 @@ logger = logging.getLogger(__name__)
 
 class MiningConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
-    log_name: str = Field("example_log", description="Name of the indexed log")
-    storage_namespace: str = Field("siesta", description="Storage namespace")
-    categories: list[str] = Field(["*"], description="Constraint categories: 'positional', 'existential', 'ordered', 'unordered', 'negation', or '*' for all")
-    grouping: str = Field("trace", description="Grouping strategy: 'trace' or 'window'")
-    window_size: int = Field(30, description="Position-based window size when grouping='window'")
-    support_threshold: float = Field(0.0, description="Minimum support fraction [0,1] to retain constraints")
-    confidence_threshold: float = Field(0.0, description="Minimum confidence fraction [0,1] to retain constraints")
-    interest_threshold: float = Field(0.0, description="Minimum interest fraction [0,1] to retain constraints")
-    include_trace_lists: bool = Field(False, description="Append a pipe-delimited trace_ids column per constraint")
-    force_recompute: bool = Field(False, description="Remine all traces ignoring previous mining state")
-    branching_type: str = Field("none", description="Branching mode: 'none' (off), 'target' (branch over targets per source), or 'source' (branch over sources per target)")
-    branching_policy: str = Field("or", description="Logical relation for merging singular constraints: 'and' (intersection), 'or' (union), or 'xor' (exclusive)")
-    branching_bound: int = Field(0, description="Maximum number of activities in a branched set; 0 = unbounded (stop on support drop)")
-    branching_approach: str = Field("auto", description="Greedy merge direction: 'bottomup', 'topdown', or 'auto' (topdown for OR, bottomup for AND/XOR)")
-    output_path: str = Field("output/example_log", description="Local path prefix for the output CSV")
+    log_name: str = Field(default="example_log", description="Name of the indexed log")
+    storage_namespace: str = Field(default="siesta", description="Storage namespace")
+    categories: list[str] = Field(default=["*"], description="Constraint categories: 'positional', 'existential', 'ordered', 'unordered', 'negation', or '*' for all")
+    grouping: str = Field(default="trace", description="Grouping strategy: 'trace' or 'window'")
+    window_size: int = Field(default=30, description="Position-based window size when grouping='window'")
+    support_threshold: float = Field(default=0.0, description="Minimum support fraction [0,1] to retain constraints")
+    confidence_threshold: float = Field(default=0.0, description="Minimum confidence fraction [0,1] to retain constraints")
+    interest_threshold: float = Field(default=0.0, description="Minimum interest fraction [0,1] to retain constraints")
+    include_trace_lists: bool = Field(default=False, description="Append a pipe-delimited trace_ids column per constraint")
+    force_recompute: bool = Field(default=False, description="Remine all traces ignoring previous mining state")
+    branching_type: str = Field(default="none", description="Branching mode: 'none' (off), 'target' (branch over targets per source), or 'source' (branch over sources per target)")
+    branching_policy: str = Field(default="or", description="Logical relation for merging singular constraints: 'and' (intersection), 'or' (union), or 'xor' (exclusive)")
+    branching_bound: int = Field(default=0, description="Maximum number of activities in a branched set; 0 = unbounded (stop on support drop)")
+    branching_approach: str = Field(default="auto", description="Greedy merge direction: 'bottomup', 'topdown', or 'auto' (topdown for OR, bottomup for AND/XOR)")
+    output_path: str = Field(default="output/example_log", description="Local path prefix for the output CSV")
 
 
 DEFAULT_MINING_CONFIG: Dict[str, Any] = MiningConfig().model_dump()
@@ -217,6 +217,6 @@ class Mining(SiestaModule):
             config["output_path"] = "output/" + config.get("log_name", "mining_results")
 
         # Ensure output_path is unique for each run to avoid overwriting results
-        given_output_path = config.get("output_path")
+        given_output_path = config["output_path"]
         Path(given_output_path).parent.mkdir(parents=True, exist_ok=True)
         self.mining_config["output_path"] = given_output_path + "_" + str(datetime.datetime.now().timestamp()) + ".csv"

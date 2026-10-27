@@ -325,7 +325,7 @@ def tokenize(text: str) -> List[Token]:
             pos += 1
             continue
         m = _MASTER_RE.match(text, pos)
-        if not m:
+        if not m or not m.lastgroup:
             raise SyntaxError(
                 f"Unexpected character {text[pos]!r} at position {pos}"
             )
@@ -399,7 +399,7 @@ def split_pattern_to_list(pattern: str) -> list:
     ]
     """
     ast = parse_pattern(pattern)
-    results = []
+    results: list = []
     _collect_activities(ast, negated=False, quantifier=Quantifier.ONE, out=results)
     return results
 

@@ -5,7 +5,7 @@ from collections import defaultdict
 import re
 from pyspark import RDD
 from pyspark.sql import DataFrame
-from typing import Iterable, List, Literal, Optional, Tuple
+from typing import Iterable, List, Literal, Optional, Tuple, TypeAlias
 from pyspark.sql.functions import col, sum as spark_sum, count, min as spark_min, max as spark_max, pow as spark_pow
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from siesta.model.DataModel import Last_Checked_table_schema, EventPair
@@ -37,14 +37,14 @@ pair_index_schema = EventPair.get_schema()
 # Schema: Source, Target, trace_id, source_timestamp, target_timestamp, source_position, target_position, source_attributes, target_attributes
 
 
-type Trace_ID = str
-type Event_Type = str
-type Timestamp = int
-type Position = int
-type Attributes = str
+Trace_ID: TypeAlias = str
+Event_Type: TypeAlias = str
+Timestamp: TypeAlias = int
+Position: TypeAlias = int
+Attributes: TypeAlias = str
 
-type Event = Tuple[Event_Type, Timestamp, Position, Attributes]
-type Trace = Tuple[Trace_ID, Tuple[Event]]
+Event: TypeAlias = Tuple[Event_Type, Timestamp, Position, Attributes]
+Trace: TypeAlias = Tuple[Trace_ID, Tuple[Event]]
 
 
 def extract_last_checked_and_all_pairs(updated_sequence_table_DF: DataFrame, previous_last_checked: DataFrame | None, lookback: str, batch_min_ts: int, batch_min_pos: int) -> Tuple[DataFrame, DataFrame]:
@@ -186,12 +186,12 @@ def createTuples(
     lookback: Tuple[int, LookbackType], 
     last_checked: Optional[int],
     trace_id: str
-) -> List[Tuple[str, str, str, str, str, int, int]]:
+) -> List[Tuple[str, str, str, int, int, int, int, str, str]]:
     """
     Creates event type pair tuples following Skip-till-next-match policy.
-    
+
     Returns:
-        List of tuples: (eventA, eventB, trace_id, timestampA, timestampB, posA, posB)
+        List of tuples: (eventA, eventB, trace_id, timestampA, timestampB, posA, posB, attrsA, attrsB)
     """
     pairs = []
     lookback_number = lookback[0]

@@ -375,7 +375,7 @@ def apply_branching(
         branching_type, policy, approach, bound if bound else "unbounded", min_traces,
         include_trace_lists, large_var,
     )
-    if include_trace_lists and large_var.lower() != "true":
+    if include_trace_lists and str(large_var).lower() != "true":
         logger.warning(
             "Branching will emit full trace_ids lists but arrow.useLargeVarTypes is "
             "off; large groups may overflow PyArrow's 2 GiB buffer and abort the "

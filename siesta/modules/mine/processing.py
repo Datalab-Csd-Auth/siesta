@@ -1,6 +1,6 @@
 import csv
 import json
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from siesta.model.StorageModel import MetaData
 from siesta.core.interfaces import StorageManager
 from siesta.core.sparkManager import cleanup as spark_cleanup
@@ -44,7 +44,7 @@ def mine(mining_config: Dict[str, Any], storage: StorageManager) -> MetaData:
     # Perform mining based on the specified categories in the mining configuration. 
     # Each miner function returns a DataFrame with a common schema, and we union them together 
     # while adding a "category" column to identify the source of each constraint.
-    miners = []
+    miners: list[tuple[str, Callable[[DataFrame, MetaData], DataFrame]]] = []
     include_trace_lists = mining_config.get("include_trace_lists", False)
     for category in mining_config["categories"]:
         if category in ["positional", "*"]:

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 if "SPARK_HOME" in os.environ:
     del os.environ["SPARK_HOME"]
 
-spark_session = None
+spark_session: SparkSession | None = None
 
 def get_docker_bridge_ip():
     """Get Docker bridge gateway IP dynamically."""

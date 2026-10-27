@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import product
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 
 OPENCEP_ROOT = Path(__file__).resolve().parent / "OpenCEP"
@@ -31,7 +31,7 @@ from transformation.PatternTransformationRules import PatternTransformationRules
 
 from siesta.modules.query.parse_seql import (
     ActivityNode, AttrConstraint, ElementNode, NegatedNode,
-    OrNode, Quantifier, SeqNode, StringLiteral, VarExpr, parse_pattern,
+    OrNode, Parser, Quantifier, SeqNode, StringLiteral, VarExpr, parse_pattern, tokenize,
 )
 
 
@@ -316,6 +316,7 @@ def _build_dsl_attr_conditions(positive_event_names: list) -> List:
                 op     = val.op      # '+' | '-' | None
                 offset = val.offset or 0
 
+                rel: Callable[..., bool]
                 if op == "+":
                     def rel(rv, ov, off=offset, neq=neq):
                         try:
@@ -447,7 +448,7 @@ class TimeConstraint:
 class EventValueConstraint:
     index: int
     attr: str
-    relation_op: callable
+    relation_op: Callable
     value: object
 
     def check(self, idxs, events):
@@ -471,7 +472,7 @@ class EventValueConstraint:
 @dataclass(frozen=True)
 class EventRelationConstraint:
     terms: tuple[tuple[int, str], ...]
-    relation_op: callable
+    relation_op: Callable
 
     def check(self, idxs, events):
         values = []
@@ -497,7 +498,7 @@ class EventRelationConstraint:
 class KleeneValueConstraint:
     index: int
     attr: str
-    relation_op: callable
+    relation_op: Callable
     value: object
 
     def check(self, idxs, events, split_matches=None):
@@ -578,8 +579,8 @@ def _build_time_condition(time_constraint: TimeConstraint, top_level_parts):
 
 
 def _split_constraints(constraints, strict_native: bool = False):
-    native = []
-    residual = []
+    native: list = []
+    residual: list = []
     if not constraints:
         return native, residual
     for constraint in constraints:

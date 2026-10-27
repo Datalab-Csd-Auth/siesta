@@ -18,7 +18,7 @@ def startup(siestaInstance: Siesta) -> None:
             continue
         module_router = APIRouter(tags=[module])
         for endpoint, route_def in registered_routes.items():
-            options = {}
+            options: dict = {}
             if len(route_def) == 3:
                 method, func, options = route_def
             else:

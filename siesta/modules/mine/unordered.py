@@ -105,9 +105,10 @@ def discover_unordered(evolved_df: DataFrame, metadata: MetaData) -> DataFrame:
     global_activities = single_table.select("activity").distinct()
     
     # Aggregate global activities into a single sorted comma-separated string
-    global_activities_str = global_activities.agg(
+    row = global_activities.agg(
         F.concat_ws(",", F.sort_array(F.collect_set("activity")))
-    ).first()[0]
+    ).first()
+    global_activities_str = row[0] if row else ""
     
     # Mine constraints for evolved traces
     if evolved_trace_ids.count() == 0:

@@ -37,7 +37,7 @@ class StorageManagerFactory:
     (S3, Cassandra, PostgreSQL, etc.) without hardcoding dependencies.
     """
     
-    _registry: Dict[str, type] = {
+    _registry: Dict[str, type[StorageManager]] = {
         "s3": S3Manager,
         # Add more storage managers here as they are implemented
         # "cassandra": CassandraManager,
@@ -45,7 +45,7 @@ class StorageManagerFactory:
     }
     
     @classmethod
-    def register_storage_manager(cls, name: str, manager_class: type) -> None:
+    def register_storage_manager(cls, name: str, manager_class: type[StorageManager]) -> None:
         """
         Register a new storage manager type.
         

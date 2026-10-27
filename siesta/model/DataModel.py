@@ -157,7 +157,7 @@ class Event:
 
     attributes: Optional[dict[str, str | int | float | bool]]
 
-    def __init__(self, activity: str = None, trace_id: str = None, position: int = None,
+    def __init__(self, activity: str = "", trace_id: str = "", position: int = -1,
                  start_timestamp: Optional[int] = None, attributes: Optional[dict] = None, **kwargs):
         self.activity = activity
         self.trace_id = trace_id

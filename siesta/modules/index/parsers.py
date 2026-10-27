@@ -42,7 +42,7 @@ def update_event_positions(eventsDF: DataFrame, metadata: MetaData):
 
     return updated_events_df
     
-def process_events_batch(preprocess_config: Dict, batch_df, batch_id=None, metadata: MetaData = None) -> DataFrame | None:
+def process_events_batch(preprocess_config: Dict, batch_df, batch_id, metadata: MetaData) -> None:
     """
     Core processing logic for event batches; parses and stores events in Sequence Table.
     Args:
@@ -236,10 +236,11 @@ def parse_xml(storage_path: str, spark: SparkSession, preprocess_config: dict) -
 
     # Mapped source keys to exclude from attributes
     mapped_source_keys = frozenset(eventConfig.all_source_keys())
-    collect_attrs = bool(eventConfig.attributes_mapping)
-    attrs_wildcard = collect_attrs and "*" in eventConfig.attributes_mapping
+    attrs_mapping = eventConfig.attributes_mapping or []
+    collect_attrs = bool(attrs_mapping)
+    attrs_wildcard = collect_attrs and "*" in attrs_mapping
     attrs_keep_keys = (
-        frozenset(eventConfig.attributes_mapping) - mapped_source_keys
+        frozenset(attrs_mapping) - mapped_source_keys
         if collect_attrs and not attrs_wildcard
         else frozenset()
     )
@@ -388,6 +389,8 @@ def _resolve_to_local_path(storage_path: str, spark: SparkSession) -> str:
     logger.info(f"Downloading remote file to local temp: {storage_path}")
 
     jvm = spark.sparkContext._jvm
+    if jvm is None:
+        raise RuntimeError("Spark JVM gateway unavailable")
     hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
     path = jvm.org.apache.hadoop.fs.Path(storage_path)
     fs = path.getFileSystem(hadoop_conf)
