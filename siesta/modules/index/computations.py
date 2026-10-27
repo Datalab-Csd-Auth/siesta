@@ -38,12 +38,12 @@ pair_index_schema = EventPair.get_schema()
 
 
 Trace_ID: TypeAlias = str
-Event_Type: TypeAlias = str
+Activity_type: TypeAlias = str
 Timestamp: TypeAlias = int
 Position: TypeAlias = int
 Attributes: TypeAlias = str
 
-Event: TypeAlias = Tuple[Event_Type, Timestamp, Position, Attributes]
+Event: TypeAlias = Tuple[Activity_type, Timestamp, Position, Attributes]
 Trace: TypeAlias = Tuple[Trace_ID, Tuple[Event]]
 
 
@@ -229,16 +229,16 @@ def createTuples(
     return pairs
 
 
-def _findCombinations(event_types: List[str]) -> List[Tuple[str, str]]:
+def _findCombinations(activity_types: List[str]) -> List[Tuple[str, str]]:
     """
     Extracts all the possible event type pairs that can occur in a trace based on the unique event types
 
     Args:
-        event_types: The unique event types in this trace
+        activity_types: The unique event types in this trace
     Returns:
         list: A list of all the possible event type pairs that can occur in this trace
     """
-    return [(t1, t2) for t1 in event_types for t2 in event_types]
+    return [(t1, t2) for t1 in activity_types for t2 in activity_types]
 
 
 def extract_counts(pairs_index: DataFrame) -> DataFrame:
